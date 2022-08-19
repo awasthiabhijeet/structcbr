@@ -678,7 +678,20 @@ def evaluate(gold, predict, db_dir, etype, kmaps):
     eval_err_num = 0
     for i, (p, g) in enumerate(zip(plist, glist)):
         p_str = p[0]
-        g_str, db = g
+        try:
+            g_str, db = g
+        except:
+            print('yo')
+            print(i)
+            print(p_str)
+            print(g)
+            assert len(g) > 2
+            g_str = ' '.join(g[:-1])
+            g_str = ' '.join(g_str.split(' '))
+            db = g[-1]
+            print(g_str)
+            print(db)
+            print('\n\n')
         db_name = db
         db = os.path.join(db_dir, db, db + ".sqlite")
         schema = Schema(get_schema(db))
@@ -827,8 +840,11 @@ def eval_exec_match(db, p_str, g_str, pred, gold):
     except:
         return False
 
-    cursor.execute(g_str)
-    q_res = cursor.fetchall()
+    try:
+        cursor.execute(g_str)
+        q_res = cursor.fetchall()
+    except:
+        return False
 
     def res_map(res, val_units):
         rmap = {}

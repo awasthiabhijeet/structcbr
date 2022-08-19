@@ -135,6 +135,12 @@ def remove_keep(node: Node):
     node.children = [remove_keep(child) for child in node.children]
     return node
 
+def remove_eos_tree(node: Node):
+    if node.name == "eos_tree":
+        node = remove_eos_tree(node.children[0])
+    node.children = [remove_eos_tree(child) for child in node.children]
+    return node
+
 
 def promote(node, root=False):
     children = node.children
@@ -384,6 +390,7 @@ def ra_to_irra(tree):
 def ra_to_sql(tree):
     if tree:
         tree = remove_keep(tree)
+        tree = remove_eos_tree(tree)
         irra = ra_to_irra(tree)
         sql = irra_to_sql(irra)
         sql = fix_between(sql)

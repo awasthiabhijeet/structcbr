@@ -33,12 +33,14 @@ import time
 from smbop.dataset_readers.enc_preproc import *
 import smbop.dataset_readers.disamb_sql as disamb_sql
 from smbop.utils.cache import TensorCache
-
+from copy import deepcopy
+from tqdm import tqdm
+import pickle
 logger = logging.getLogger(__name__)
 
 
-@DatasetReader.register("smbop")
-class SmbopSpiderDatasetReader(DatasetReader):
+@DatasetReader.register("cbr_concat")
+class CBRConcat(DatasetReader):
     def __init__(
         self,
         lazy: bool = True,
@@ -57,6 +59,8 @@ class SmbopSpiderDatasetReader(DatasetReader):
         limit_instances=-1,
         value_pred=True,
         use_longdb=True,
+        is_training=True,
+        neighbour_file: str = None,
     ):
         super().__init__(
             # lazy=lazy,
@@ -66,7 +70,7 @@ class SmbopSpiderDatasetReader(DatasetReader):
             # manual_multi_process_sharding=True,
         )
         self.cache_directory = cache_directory
-        # self.cache = TensorCache(cache_directory)
+        self.cache = TensorCache(cache_directory)
         self.value_pred = value_pred
         self._decoder_timesteps = decoder_timesteps
         self._max_instances = max_instances
@@ -77,7 +81,7 @@ class SmbopSpiderDatasetReader(DatasetReader):
 
         self._tokenizer = self._utterance_token_indexers["tokens"]._allennlp_tokenizer
         self.cls_token = self._tokenizer.tokenize("a")[0]
-        self.eos_token = self._tokenizer.tokenize("a")[-1]
+        self.eos_token = self._tokenizer.tokenize("[SEP] a")[-1]
         self._keep_if_unparsable = keep_if_unparsable
 
         self._tables_file = tables_file
@@ -96,6 +100,13 @@ class SmbopSpiderDatasetReader(DatasetReader):
         )
         self._create_action_dicts()
         self.replacer = Replacer(tables_file)
+
+        self.is_training = is_training
+        if neighbour_file is not None:
+            self.neighbours = pickle.load(open(neighbour_file,'rb'))
+            print(f'\n**** loaded neighbours from {neighbour_file} ***\n')
+        else:
+            self.neighbours = None
 
     def _create_action_dicts(self):
         unary_ops = [
@@ -176,47 +187,27 @@ class SmbopSpiderDatasetReader(DatasetReader):
 
     @overrides
     def _read(self, file_path: str):
-        if file_path.endswith(".json"):
+        if file_path.endswith(".pkl"):
             yield from self._read_examples_file(file_path)
         else:
             raise ConfigurationError(f"Don't know how to read filetype of {file_path}")
 
+
     def _read_examples_file(self, file_path: str):
-        # cache_dir = os.path.join("cache", file_path.split("/")[-1])
         print('Reading: ',file_path)
         cnt = 0
         cache_buffer = []
         cont_flag = True
-        sent_set = set()
-        for total_cnt,ins in self.cache:
-            if cnt >= self._max_instances:
-                break
-            if ins is not None:
-                yield ins
-                cnt += 1
-            sent_set.add(total_cnt)
-            if self.load_less and len(sent_set) > self.limit_instances:
-                cont_flag = False
-                break
-
         if cont_flag:
-            with open(file_path, "r") as data_file:
-                json_obj = json.load(data_file)
-                for total_cnt, ex in enumerate(json_obj):
+            with open(file_path, "rb") as data_file:
+                pkl_obj = pickle.load(data_file)
+                #[item.add_field('inst_id',MetadataField(i)) for i,item in enumerate(pkl_obj)]
+                self.all_instances = pkl_obj
+                for total_cnt, ex in enumerate(pkl_obj):
                     if cnt >= self._max_instances:
                         break
-                    if len(cache_buffer)>50:
-                        self.cache.write(cache_buffer)
-                        cache_buffer = []
-                    if total_cnt in sent_set:
-                        continue
-                    else:    
-                        ins = self.create_instance(ex)
-                        cache_buffer.append([total_cnt, ins])
-                    if ins is not None:
-                        yield ins
-                        cnt +=1
-            self.cache.write(cache_buffer)
+                    yield ex
+                    cnt+=1
 
 
     def process_instance(self, instance: Instance, index: int):
@@ -238,7 +229,6 @@ class SmbopSpiderDatasetReader(DatasetReader):
         # ex["query"] = ex["query"].replace(' ) ', ')')
         # ex["query"] = ex["query"].replace('( ', '(')
         # ex["query"] = ex["query"].replace(' )', ')')
-
 
     def create_instance(self,ex):
         sql = None
@@ -268,6 +258,21 @@ class SmbopSpiderDatasetReader(DatasetReader):
         )
         return ins
 
+    def process_and_dump_pickle(self, input_file_path: str, output_file_path: str):
+        print('Reading: ',input_file_path)
+        cnt = 0
+        processed_instances = []
+        with open(input_file_path, "r") as data_file:
+            json_obj = json.load(data_file)
+            for total_cnt, ex in tqdm(enumerate(json_obj),total=len(json_obj)):
+                if cnt >= self._max_instances:
+                    break
+                ins = self.create_instance(ex)
+                if ins is not None:
+                    processed_instances.append(ins)
+                    cnt +=1
+        pickle.dump(processed_instances,open(output_file_path,"wb"))
+
 
     def text_to_instance(
         self, utterance: str, db_id: str, sql=None, sql_with_values=None
@@ -275,8 +280,10 @@ class SmbopSpiderDatasetReader(DatasetReader):
         fields: Dict[str, Field] = {
             "db_id": MetadataField(db_id),
         }
+        fields["utterance"] = MetadataField(utterance)
 
-        tokenized_utterance = self._tokenizer.tokenize(utterance)
+        tokenized_utterance = self._tokenizer.tokenize(utterance+' [SEP] [SEP]')
+
         has_gold = sql is not None
 
         if has_gold:
@@ -333,14 +340,16 @@ class SmbopSpiderDatasetReader(DatasetReader):
                     "tree_obj": MetadataField(tree_obj),
                 }
             )
-
+        
         desc = self.enc_preproc.get_desc(tokenized_utterance, db_id) # output of preprocess_item in enc_preproc.py
+        
         entities, added_values, relation = self.extract_relation(desc)
-
+        # print(entities)
 
         question_concated = [[x] for x in tokenized_utterance[1:-1]]
+        # question_concated = [[x] for x in tokenized_utterance[1:]] #NOTE: changed because bigbird doesnt add any token at the end, use above line for grappa
         schema_tokens_pre, schema_tokens_pre_mask = table_text_encoding(
-            entities[len(added_values) + 1 :] # why +1 ?
+            entities[len(added_values) + 1 :]
         )
 
         schema_size = len(entities)
@@ -348,7 +357,9 @@ class SmbopSpiderDatasetReader(DatasetReader):
 
         schema_tokens = [
             [y for y in x if y.text not in ["_"]]
-            for x in [self._tokenizer.tokenize(x)[1:-1] for x in schema_tokens_pre]
+            # for x in [self._tokenizer.tokenize(x)[1:-1] for x in schema_tokens_pre]
+            for x in [self._tokenizer.tokenize(x+' [SEP] [SEP]')[1:-1] for x in schema_tokens_pre] #NOTE:  changed because bigbird doesnt add any token at the end(this was fixed by 2 sep token, actually it adds but Token type id doesnt allow take last 2 tokens to be returned), use above line for grappa
+            # for x in [self._tokenizer.tokenize(x)[1:] for x in schema_tokens_pre] #NOTE: changed because bigbird doesnt add any token at the end(this was fixed by 2 sep token, actually it adds but Token type id doesnt allow take last 2 tokens to be returned), this is also for bigbird when we say use a single sep
         ]
 
         entities_as_leafs = [x.split(":")[0] for x in entities[len(added_values) + 1 :]]
@@ -390,6 +401,7 @@ class SmbopSpiderDatasetReader(DatasetReader):
             )
 
         utt_len = len(tokenized_utterance[1:-1])
+        # utt_len = len(tokenized_utterance[1:]) #NOTE: changed because bigbird doesnt add any token at the end, use above line for grappa. Now above line works with big bird also because we add sep
         if self.value_pred:
             span_hash_array = self.hash_spans(tokenized_utterance)
             fields["span_hash"] = ArrayField(
@@ -445,6 +457,9 @@ class SmbopSpiderDatasetReader(DatasetReader):
             np.array(offsets), padding_value=0, dtype=np.int32
         )
         fields["enc"] = TextField(enc_field_list)
+        # print('######')
+        # print(fields['enc'])
+        # print('######')
 
         ins = Instance(fields)
         return ins
@@ -452,7 +467,11 @@ class SmbopSpiderDatasetReader(DatasetReader):
     def extract_relation(self, desc):
         def parse_col(col_list):
             col_type = col_list[0]
-            col_name, table = "_".join(col_list[1:]).split("_<table-sep>_")
+            try:
+                col_name, table = "_".join(col_list[1:]).split("_<table-sep>_")
+            except:
+                import pdb
+                pdb.set_trace()
             return f'{table}.{col_name}:{col_type.replace("<type: ","")[:-1]}'
 
         question_concated = [x for x in desc["question"]]
@@ -554,7 +573,14 @@ class SmbopSpiderDatasetReader(DatasetReader):
         return span_hash_array
 
     def apply_token_indexers(self, instance: Instance) -> None:
-        instance.fields["enc"].token_indexers = self._utterance_token_indexers
+        if isinstance(instance.fields["enc"], ListField):
+            for text_field in instance.fields["enc"].field_list:
+                text_field.token_indexers = self._utterance_token_indexers
+        else:
+            instance.fields["enc"].token_indexers = self._utterance_token_indexers
+
+    # def apply_token_indexers(self, instance: Instance) -> None:
+    #     instance.fields["enc"].token_indexers = self._utterance_token_indexers
 
 
 def table_text_encoding(entity_text_list):

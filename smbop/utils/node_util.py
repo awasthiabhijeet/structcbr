@@ -54,6 +54,11 @@ def pad_with_keep(node, i):
     node.parent = prev
     return root
 
+def append_eos_tree(node):
+    root = Node("eos_tree")
+    node.parent = root
+    return root
+
 
 def add_max_depth_att(node):
     if not node.children:

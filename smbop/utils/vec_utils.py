@@ -21,17 +21,17 @@ def compute_op_idx(batch_size, seq_len, binary_op_count, unary_op_count, device)
         ],
         dim=-1,
     )
-    return frontier_op_ids
+    return frontier_op_ids # B x (seq_len**2*binary_op_count + seq_len*unary_op_count)
 
 
 @lru_cache(maxsize=128)
 def compute_beam_idx(batch_size, seq_len, binary_op_count, unary_op_count, device):
     binary_beam_idx = (
         torch.arange(seq_len ** 2, device=device)
-        .unsqueeze(0)
-        .unsqueeze(-1)
-        .expand([batch_size, seq_len ** 2, binary_op_count])
-        .reshape([batch_size, -1])
+        .unsqueeze(0) # 1 x seq_len**2
+        .unsqueeze(-1) # 1 x seq_len**2 x 1
+        .expand([batch_size, seq_len ** 2, binary_op_count]) # B x seq_len**2 x binary_op_count
+        .reshape([batch_size, -1]) # B x (seq_len**2 * binary_op_count)
     )
     l_binary_beam_idx = binary_beam_idx // seq_len
     r_binary_beam_idx = binary_beam_idx % seq_len
@@ -40,10 +40,10 @@ def compute_beam_idx(batch_size, seq_len, binary_op_count, unary_op_count, devic
         .unsqueeze(0)
         .unsqueeze(-1)
         .expand([batch_size, seq_len, unary_op_count])
-        .reshape([batch_size, -1])
+        .reshape([batch_size, -1]) # B x (seq_len * unary_op_count)
     )
-    l_beam_idx = torch.cat([l_binary_beam_idx, unary_beam_idx], dim=-1)
-    r_beam_idx = torch.cat([r_binary_beam_idx, unary_beam_idx], dim=-1)
+    l_beam_idx = torch.cat([l_binary_beam_idx, unary_beam_idx], dim=-1) # B x [(seq_len**2 * binary_op_count) + seq_len * unary_op_count]
+    r_beam_idx = torch.cat([r_binary_beam_idx, unary_beam_idx], dim=-1) # B x [(seq_len**2 * binary_op_count) + seq_len * unary_op_count]
     return l_beam_idx, r_beam_idx
 
 
@@ -170,3 +170,9 @@ def get_span_scores(
     #     span_end_indices = best_spans % passage_length
     #     return torch.stack([span_start_indices, span_end_indices], dim=-1)
     return valid_span_log_probs
+
+def custom_layer_norm(x, eps=1e-05, axis=-1):
+    x_mean = x.mean(dim=axis,keepdim=True)
+    x_var = x.var(dim=axis,unbiased=False,keepdim=True)
+    result = (x - x_mean)/(torch.sqrt(x_var+eps))
+    return result

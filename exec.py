@@ -6,10 +6,25 @@ import subprocess
 import pathlib
 from allennlp.commands.train import train_model
 from allennlp.common import Params
-from smbop.dataset_readers.spider import SmbopSpiderDatasetReader
+
+from smbop.dataset_readers.cbr_with_same_schema import CBRSameSchemaDatasetReader
+from smbop.dataset_readers.pickle_reader import PickleReader
+from smbop.dataset_readers.cbr_concat import CBRConcat
+from smbop.dataset_readers.cbr_concat_roberta import CBRConcatRoberta
+
+from smbop.data_loaders.cbr_with_same_schema import CBRSameSchemaDataLoader
+from smbop.data_loaders.cbr_concat import CBRConcat
+from smbop.data_loaders.cbr_concat_roberta import CBRConcatRoberta
+
 from smbop.models.smbop import SmbopParser
+from smbop.models.tx_cbr_improved_entire_frontier import TXCBRImprovedEntireFrontier
+from smbop.models.cbr_concat import CBRConcat
+from smbop.models.cbr_concat_roberta import CBRConcatRoberta
+
+
 from smbop.modules.relation_transformer import RelationTransformer
 from smbop.modules.lxmert import LxmertCrossAttentionLayer
+from smbop.training.finetuner import FineTuner
 import namegenerator
 
 
@@ -25,9 +40,17 @@ def to_string(value):
 def run():
     parser = argparse.ArgumentParser(allow_abbrev=True)
     parser.add_argument("--name", nargs="?")
-    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--force", action="store_true",
+                        help="""If True, we will overwrite the serialization
+                                directory if it already exists.""")
     parser.add_argument("--gpu", type=str, default="0")
-    parser.add_argument("--recover", action="store_true")
+    parser.add_argument("--recover", action="store_true",
+                        help= """If True, we will try to recover a training run
+                                 from an existing serialization directory. 
+                                 This is only intended for use when something 
+                                 actually crashed during the middle of a run. 
+                                 For continuing training a model on new data,
+                                  see Model.from_archive.""")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--detect_anomoly", action="store_true")
     parser.add_argument("--profile", action="store_true")
@@ -70,6 +93,7 @@ def run():
     parser.add_argument("--temperature", default=1.0, type=float)
     parser.add_argument("--grad_clip", default=-1, type=float)
     parser.add_argument("--grad_norm", default=-1, type=float)
+    parser.add_argument("--config_path", default="configs/defaults.jsonnet", type=str)
 
     default_dict = {k.option_strings[0][2:]: k.default for k in parser._actions}
     args = parser.parse_args()
@@ -77,9 +101,9 @@ def run():
         [
             f"{key}{value}"
             for key, value in vars(args).items()
-            if (key != "name" and value != default_dict[key])
+            if (key not in ["name", "config_path"] and value != default_dict[key])
         ]
-    )
+    ) #vars which differ from default
 
     ext_vars = {}
     for key, value in vars(args).items():
@@ -88,8 +112,8 @@ def run():
             ext_vars[new_key] = to_string(not value)
         else:
             ext_vars[key] = to_string(value)
-    print(ext_vars)
-    default_config_file = "configs/defaults.jsonnet"
+    print(ext_vars) #just a toggle of disabled variables
+    config_path = args.config_path
 
     overrides_dict = {}
 
@@ -108,14 +132,11 @@ def run():
     ext_vars["experiment_name"] = experiment_name
     overrides_json = json.dumps(overrides_dict)
     settings = Params.from_file(
-        default_config_file,
+        config_path,
         ext_vars=ext_vars,
         params_overrides=overrides_json,
     )
     prefix = ""
-    # prefix = "/home/ohadr/"
-    prefix = "/media/disk1/ohadr/"
-
 
     assert not pathlib.Path(f"{prefix}experiments/{experiment_name}").exists()
 

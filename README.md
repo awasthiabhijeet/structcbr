@@ -1,7 +1,47 @@
-# SmBoP: Semi-autoregressive Bottom-up Semantic Parsing 
+# StructCBR: Structured Case-based Reasoning for Inference-time Adaptation of Text-to-SQL models
+
+This code is built on top of the Author implementation of [SmBOP](https://github.com/OhadRubin/SmBop)
+
+**NOTE**: This is an inital version of the code. We will release a cleaner version with the public version of our paper.
+
+# Instructions
+
+## Installation
+
+1. Install `requirements.txt`:   `pip install -r requirements.txt`
+2. Follow original SmBOP installation instructions given below (also available [here](https://github.com/OhadRubin/SmBop))
 
 
-Author implementation of this [NAACL 2021 paper](https://arxiv.org/abs/2010.12412).
+## Data Pre-processing
+
+1. Download Spider dataset
+  - bash scripts/download_spider.sh
+2. Preprocess spider dataset
+  - python3 python3 process_spider_data.py
+3. Generate 3 random D_new/D_test Splits for the five dev schemas
+  - `python3 generate_case_test_splits.py 0`
+  - `python3 generate_case_test_splits.py 1`
+  - `python3 generate_case_test_splits.py 2`
+
+
+## Running Experiments
+
+### SmBOP Model
+1. Training: `bash train_infer_scripts/train_smbop.sh`
+2. Inference: `bash train_infer_scripts/infer_smbop.sh`
+
+### StructCBR Model:
+1. Training: `bash train_infer_scripts/train_structcbr.sh`
+2. Inference: `bash train_infer_scripts/infer_structcbr.sh`
+
+
+## Useful Files
+
+1. `smbop/models/structcbr.py`: Implements the StructCBR logic over SmBOP
+2. `smbop/models/smbop.py`: Original SmBOP implementation
+
+
+# README Instructions from the original SmBoP code:
 
 ## Install & Configure
 

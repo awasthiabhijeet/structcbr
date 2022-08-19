@@ -13,7 +13,7 @@ from __future__ import absolute_import, division, unicode_literals
 from collections import Mapping
 import json
 
-from mo_future import binary_type, items, number_types, text_type
+from mo_future import binary_type, items, number_types, text
 from pyparsing import ParseException, ParseResults
 
 from smbop.utils.moz_sql_parser.sql_parser import SQLParser, all_exceptions
@@ -65,7 +65,7 @@ def format(json, **kwargs):
 
 
 def _scrub(result):
-    if isinstance(result, text_type):
+    if isinstance(result, text):
         return result
     elif isinstance(result, binary_type):
         return result.decode("utf8")
