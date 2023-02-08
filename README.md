@@ -2,7 +2,7 @@
 
 This code is built on top of the Author implementation of [SmBOP](https://github.com/OhadRubin/SmBop)
 
-**NOTE**: This is an inital version of the code. We will release a cleaner version with the public version of our paper.
+**NOTE**: This is an inital version of the code. We will release a cleaner version soon.
 
 # Instructions
 
@@ -37,7 +37,7 @@ This code is built on top of the Author implementation of [SmBOP](https://github
 
 ## Useful Files
 
-1. `smbop/models/structcbr.py`: Implements the StructCBR logic over SmBOP
+1. `smbop/models/tx_cbr_improved_entire_frontier.py`: Implements the StructCBR logic over SmBOP
 2. `smbop/models/smbop.py`: Original SmBOP implementation
 
 
